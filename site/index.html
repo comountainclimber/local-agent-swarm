@@ -1,0 +1,795 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Agent Swarm</title>
+<meta name="description" content="A local-first, multi-agent software-engineering orchestrator. Frontier models plan; local open-weight models iterate.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #05070d;
+    --panel: rgba(12, 16, 28, 0.78);
+    --line: rgba(140, 170, 255, 0.16);
+    --text: #e6ebff;
+    --muted: #8b95b8;
+    --violet: #a78bfa;
+    --cyan: #22d3ee;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; }
+  body { overflow-x: hidden; }
+  a { color: var(--cyan); }
+
+  /* ---------- hero / 3D stage ---------- */
+  #stage { position: relative; height: 100vh; min-height: 560px; width: 100%; }
+  #stage canvas { display: block; }
+  #labels { position: absolute; inset: 0; pointer-events: none; }
+  .lbl {
+    font: 600 11px/1.2 var(--mono); letter-spacing: .04em; color: var(--text);
+    padding: 3px 7px; border-radius: 6px; background: rgba(8, 11, 20, .72);
+    border: 1px solid var(--line); white-space: nowrap; pointer-events: auto; cursor: pointer;
+    transition: border-color .2s, color .2s;
+  }
+  .lbl:hover { border-color: var(--cyan); color: var(--cyan); }
+  .lbl small { display: block; font-weight: 400; color: var(--muted); font-size: 10px; }
+  .lbl.task { font-size: 10px; padding: 2px 6px; }
+  .lbl.offline { color: var(--red); border-color: rgba(248,113,113,.5); }
+
+  .hud { position: absolute; pointer-events: none; }
+  .hud > * { pointer-events: auto; }
+  #title { top: 28px; left: 32px; max-width: 460px; }
+  #title .eyebrow { font: 600 11px var(--mono); color: var(--cyan); letter-spacing: .18em; text-transform: uppercase; }
+  #title h1 { margin: 8px 0 10px; font-size: clamp(30px, 4.4vw, 54px); line-height: 1.02; letter-spacing: -.03em; }
+  #title h1 span { background: linear-gradient(90deg, var(--violet), var(--cyan)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #title p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+
+  #controls { bottom: 28px; left: 32px; display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    font: 600 12px var(--mono); color: var(--text); background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 8px; padding: 9px 13px; cursor: pointer; transition: .2s;
+  }
+  button:hover { border-color: var(--cyan); color: var(--cyan); }
+  button.danger:hover { border-color: var(--red); color: var(--red); }
+
+  #log {
+    bottom: 28px; right: 32px; width: 340px; max-height: 210px; overflow: hidden;
+    background: var(--panel); backdrop-filter: blur(10px); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 14px; font: 11px/1.6 var(--mono); color: var(--muted);
+  }
+  #log .head { color: var(--text); font-weight: 600; margin-bottom: 4px; display: flex; justify-content: space-between; }
+  #log .ev { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: fadein .4s; }
+  #log .ev b { font-weight: 600; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } }
+
+  #info {
+    top: 28px; right: 32px; width: 340px; background: var(--panel); backdrop-filter: blur(12px);
+    border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; opacity: 0; transform: translateY(-6px);
+    transition: .25s; pointer-events: none;
+  }
+  #info.show { opacity: 1; transform: none; pointer-events: auto; }
+  #info .k { font: 600 10px var(--mono); color: var(--violet); letter-spacing: .14em; text-transform: uppercase; }
+  #info h3 { margin: 6px 0 8px; font-size: 18px; }
+  #info p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+  #info .close { position: absolute; top: 10px; right: 12px; background: none; border: 0; padding: 4px; color: var(--muted); }
+
+  #legend { top: 50%; left: 32px; transform: translateY(-10%); font: 11px/1.9 var(--mono); color: var(--muted); }
+  #legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: -1px; }
+
+  .scroll-cue { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font: 10px var(--mono); color: var(--muted); letter-spacing: .2em; pointer-events: none; }
+
+  /* ---------- content ---------- */
+  main { max-width: 1080px; margin: 0 auto; padding: 96px 32px 64px; }
+  section { margin-bottom: 104px; }
+  .sec-k { font: 600 11px var(--mono); color: var(--cyan); letter-spacing: .18em; text-transform: uppercase; }
+  h2 { font-size: clamp(26px, 3.2vw, 38px); letter-spacing: -.02em; margin: 10px 0 14px; }
+  .lede { color: var(--muted); font-size: 17px; line-height: 1.6; max-width: 720px; margin: 0 0 36px; }
+  pre.flow {
+    font: 13px/1.7 var(--mono); color: var(--text); background: #0a0e1a; border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px 24px; overflow-x: auto; margin: 0;
+  }
+  pre.flow .a { color: var(--violet); } pre.flow .b { color: var(--cyan); } pre.flow .c { color: var(--green); }
+
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+  .card {
+    background: linear-gradient(180deg, rgba(20,26,46,.7), rgba(10,13,24,.7)); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px; transition: transform .25s, border-color .25s;
+  }
+  .card:hover { transform: translateY(-3px); border-color: rgba(34,211,238,.4); }
+  .card .n { font: 600 12px var(--mono); color: var(--violet); }
+  .card h4 { margin: 8px 0 6px; font-size: 15px; }
+  .card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+
+  .loop { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+  .loop li { counter-increment: s; display: flex; gap: 14px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: rgba(12,16,28,.5); font-size: 14px; color: var(--muted); line-height: 1.5; }
+  .loop li::before { content: counter(s, decimal-leading-zero); font: 600 12px var(--mono); color: var(--cyan); padding-top: 2px; }
+
+  .timeline { position: relative; padding-left: 28px; }
+  .timeline::before { content: ""; position: absolute; left: 7px; top: 6px; bottom: 6px; width: 2px; background: linear-gradient(var(--cyan), var(--violet), transparent); }
+  .phase { position: relative; margin-bottom: 22px; }
+  .phase::before { content: ""; position: absolute; left: -26px; top: 5px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg); border: 2px solid var(--violet); }
+  .phase.now::before { background: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 14px var(--cyan); }
+  .phase h4 { margin: 0 0 4px; font-size: 15px; }
+  .phase h4 em { font-style: normal; font: 600 10px var(--mono); color: var(--bg); background: var(--cyan); padding: 2px 6px; border-radius: 4px; margin-left: 8px; vertical-align: 2px; }
+  .phase p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.55; max-width: 760px; }
+  .phase .exit { color: var(--text); opacity: .75; font-size: 12.5px; margin-top: 4px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font: 600 11px var(--mono); color: var(--muted); letter-spacing: .1em; text-transform: uppercase; }
+  td:first-child { color: var(--text); white-space: nowrap; }
+  td { color: var(--muted); }
+  code { font-family: var(--mono); font-size: .92em; color: var(--cyan); }
+
+  footer { border-top: 1px solid var(--line); padding: 32px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  @media (max-width: 820px) {
+    #title { left: 16px; right: 16px; top: 18px; }
+    #title p { font-size: 13px; }
+    #legend { display: none; }
+    #log { left: 16px; right: 16px; width: auto; bottom: 74px; max-height: 120px; }
+    #controls { left: 16px; right: 16px; bottom: 18px; }
+    #info { left: 16px; right: 16px; width: auto; top: auto; bottom: 74px; }
+    main { padding: 64px 16px 48px; }
+    .lbl small { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="labels"></div>
+
+  <div class="hud" id="title">
+    <div class="eyebrow">Phase 0 · Architecture</div>
+    <h1>Local <span>Agent Swarm</span></h1>
+    <p>Frontier intelligence plans. Local open-weight models iterate — implementation, tests, debugging, review — at effectively zero marginal token cost.</p>
+  </div>
+
+  <div class="hud" id="legend">
+    <div><i style="background:#3b4466"></i>pending</div>
+    <div><i style="background:#fbbf24"></i>running</div>
+    <div><i style="background:#22d3ee"></i>verifying</div>
+    <div><i style="background:#a78bfa"></i>reviewing</div>
+    <div><i style="background:#34d399"></i>accepted</div>
+  </div>
+
+  <div class="hud" id="info">
+    <button class="close" aria-label="Close">✕</button>
+    <div class="k" id="info-k"></div>
+    <h3 id="info-h"></h3>
+    <p id="info-p"></p>
+  </div>
+
+  <div class="hud" id="log"><div class="head"><span>event store</span><span id="clock">t+0s</span></div><div id="events"></div></div>
+
+  <div class="hud" id="controls">
+    <button id="btn-run">▶ New run</button>
+    <button id="btn-kill" class="danger">⚡ Kill a node</button>
+    <button id="btn-orbit">⟳ Auto-orbit</button>
+  </div>
+
+  <div class="scroll-cue">SCROLL ↓</div>
+</div>
+
+<main>
+  <section>
+    <div class="sec-k">Core architecture</div>
+    <h2>One control plane. Any number of inference nodes.</h2>
+    <p class="lede">A coding agent's <em>hands</em> operate in a local git worktree while its model's <em>brain</em> may run on another Mac or GPU host. The scheduler knows endpoint URLs, capabilities, health and capacity — never whether traffic rides Wi‑Fi, Ethernet or Thunderbolt.</p>
+<pre class="flow"><span class="a">user</span> → <span class="a">frontier planner</span> → task DAG → scheduler → coding agents in worktrees
+                                            ↘ <span class="b">HTTP inference nodes</span>
+                            verification → review → <span class="c">human-approved integration</span></pre>
+  </section>
+
+  <section>
+    <div class="sec-k">Components</div>
+    <h2>Each part owns one thing.</h2>
+    <p class="lede">The orchestrator connects existing systems and records their outcomes. Magnitude owns model serving, git owns history, and runtimes like Codex CLI or OpenCode own the edit/tool loop.</p>
+    <div class="grid" id="components"></div>
+  </section>
+
+  <section>
+    <div class="sec-k">Control loop</div>
+    <h2>Plan once, execute many.</h2>
+    <p class="lede">Tight scopes, explicit acceptance criteria and executable checks make smaller models far more effective than a single broad prompt.</p>
+    <ol class="loop">
+      <li>A user supplies a goal and constraints.</li>
+      <li>The frontier planner inspects the repo and produces a task DAG plus work packets.</li>
+      <li>The orchestrator validates packet shape, acyclicity, permissions and verification commands.</li>
+      <li>The scheduler leases ready tasks and suitable inference capacity.</li>
+      <li>Agent processes iterate inside isolated worktrees.</li>
+      <li>Verification evidence and structured results are persisted.</li>
+      <li>Independent reviewers accept, reject, or propose bounded repair work.</li>
+      <li>Workers may propose follow-ups; scope expansion needs approval.</li>
+      <li>Accepted branches integrate in dependency order; aggregate checks run.</li>
+      <li>A frontier model does final review; a human controls merge and push.</li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="sec-k">Routing policy</div>
+    <h2>Right model, right node.</h2>
+    <p class="lede">Eligibility first — health, capacity, model, capabilities, context window — then explicit, observable ranking: least active sessions, configured preference, stable tie-break.</p>
+    <table>
+      <thead><tr><th>Work</th><th>Default route</th></tr></thead>
+      <tbody>
+        <tr><td>Mechanical, tightly constrained edits</td><td>Small/medium local coder</td></tr>
+        <tr><td>Normal implementation and debugging</td><td>Strong local coder</td></tr>
+        <tr><td>Repository investigation</td><td>Fast local model</td></tr>
+        <tr><td>Diff and security-oriented review</td><td>Local reviewer model</td></tr>
+        <tr><td>Ambiguous architecture / product choice</td><td>Frontier model</td></tr>
+        <tr><td>Large context</td><td>Model/node with sufficient context and memory</td></tr>
+        <tr><td>Repeated local failure</td><td>Stronger local model, then frontier escalation</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-k">Design principles</div>
+    <h2>Ten rules.</h2>
+    <div class="grid" id="principles"></div>
+  </section>
+
+  <section>
+    <div class="sec-k">Roadmap</div>
+    <h2>Prove one dimension at a time.</h2>
+    <div class="timeline" id="roadmap"></div>
+  </section>
+</main>
+
+<footer>
+  <a href="https://github.com/comountainclimber/local-agent-swarm">github.com/comountainclimber/local-agent-swarm</a> · design docs, not an implementation (yet)
+</footer>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+/* ================= content ================= */
+const INFO = {
+  planner: ['Frontier', 'Frontier planner / reviewer', 'Investigates the repository, resolves ambiguity, decomposes the goal into a dependency-aware DAG of work packets, approves repairs and performs final cross-cutting review. Scarce intelligence spent where it matters.'],
+  orchestrator: ['Control plane · Mac 1', 'Orchestrator', 'Owns run lifecycle, the task DAG, persistence, approvals and integration coordination. Never serves models and never reimplements git.'],
+  scheduler: ['Control plane', 'Scheduler / router', 'Answers two separate questions: which task is ready, and where should its inference run? Filters nodes by eligibility, then ranks by least active sessions.'],
+  worktrees: ['Control plane', 'Worktrees', 'The unit of isolation. Each task gets its own branch, worktree, agent process and log stream. Two tasks never edit the same worktree; dirty worktrees are quarantined, not deleted.'],
+  store: ['Control plane', 'State / event store', 'SQLite is enough to start. Tables cache current state; an append-only event log preserves the audit trail: packet issued, node selected, command run, review requested…'],
+  verify: ['Gate', 'Verification runner', 'Executes the packet’s declared checks and captures evidence. A worker may not claim completion with skipped required checks.'],
+  review: ['Gate', 'Reviewer', 'A distinct attempt, preferably on another model or node. Outcome is accepted, repair-required, or escalate. Repairs become narrow packets.'],
+  main: ['Integration', 'Human-approved integration', 'Accepted branches integrate in dependency order with aggregate checks. Merge, push and PR creation are separate, permissioned actions — humans keep final control.'],
+  node: ['Inference node', 'Magnitude endpoint', 'An ordinary HTTP endpoint serving a coding or reviewer model. Holds no source checkout. Nodes are disposable: losing one fails an attempt, never the task.'],
+  dag: ['Task DAG', 'Work packets', 'Immutable packet revisions with scope, invariants, non-goals, acceptance criteria and verification commands. A task is ready only when all dependencies are accepted.'],
+};
+
+const PRINCIPLES = [
+  ['Frontier intelligence is scarce; local tokens are cheap.', 'Spend frontier calls on ambiguity, architecture and judgment.'],
+  ['Plan once, execute many.', 'One careful decomposition feeds many cheap iterations.'],
+  ['Tight scopes beat giant prompts.', 'Small models thrive on bounded, explicit packets.'],
+  ['Every task must be verifiable.', 'Executable checks turn abundant inference into reliability.'],
+  ['Worktrees are the unit of isolation.', 'One task, one branch, one worktree, one agent.'],
+  ['Inference location is independent from execution location.', 'Hands on the control plane, brains anywhere.'],
+  ['Providers are replaceable; hardware nodes are disposable.', 'A normalized streaming contract hides every backend.'],
+  ['Failures create durable evidence, not chaos.', 'Retries are new attempts; history is never overwritten.'],
+  ['Humans retain final control.', 'Merge and push are explicit, permissioned boundaries.'],
+  ['Prefer simple protocols and the smallest useful orchestrator.', 'HTTP, SQLite, git. Nothing exotic.'],
+];
+
+const ROADMAP = [
+  ['Phase 0 — Documentation & architecture', 'Boundaries, interfaces, lifecycle, packets, safety and failure policy. Manually validate remote Magnitude API behavior.', 'Exit: stakeholders can trace an end-to-end run.', true],
+  ['Phase 1 — Single-machine proof of concept', 'One TypeScript orchestrator, one worktree, one local Magnitude endpoint, one coding agent, one manual packet.', 'Exit: a bounded task completes reproducibly without manual edits.'],
+  ['Phase 2 — Frontier planning', 'A frontier model inspects the repo, emits validated packets and reviews one local result.', 'Exit: one goal becomes an auditable packet that survives frontier review.'],
+  ['Phase 3 — Multi-worker local execution', 'Multiple worktrees, DAG readiness, parallel agents, reviewer roles, follow-up proposals.', 'Exit: independent tasks run concurrently; dependents unblock deterministically.'],
+  ['Phase 4 — Multi-node inference cluster', 'Node registry, health probes, capability matching, capacity limits, least-loaded routing.', 'Exit: tasks survive loss of one inference node.'],
+  ['Phase 5 — Robust orchestration', 'Authoritative SQLite state, leases, resumable runs, recovery reconciliation, approval gates.', 'Exit: a killed orchestrator resumes without duplicate work or lost evidence.'],
+  ['Phase 6 — Dashboard', 'Live tasks, nodes, logs, verification, approvals, DAG state and estimated avoided API cost.', 'Exit: operators control a run without reading raw database state.'],
+  ['Phase 7 — Advanced scheduling', 'Historical performance informs task/model matching and adaptive escalation.', 'Exit: routing improves outcomes while staying explainable.'],
+  ['Phase 8 — Optional research', 'Sharded inference, Thunderbolt/RDMA, larger shared models, speculative workflows.', 'Experiments — not dependencies of the core product.'],
+];
+
+const COMPONENTS = [
+  ['Frontier planner', 'Investigate, clarify, decompose, approve repairs, final review'],
+  ['Orchestrator', 'Run lifecycle, task DAG, persistence, approvals, integration'],
+  ['Scheduler / router', 'Ready tasks → eligible provider, node, model, retry policy'],
+  ['Worktree manager', 'Create, validate, archive and safely remove worktrees'],
+  ['Agent adapter', 'Launch a coding runtime with packet, provider and limits'],
+  ['Inference provider', 'Normalize streaming requests, events, errors, usage'],
+  ['Node registry', 'Endpoint, model, capability, capacity and health metadata'],
+  ['Verification runner', 'Execute declared checks and capture evidence'],
+  ['Reviewer', 'Compare diff and evidence against packet; propose repairs'],
+  ['State / event store', 'Durable run state and append-only operational evidence'],
+];
+
+document.getElementById('principles').innerHTML = PRINCIPLES.map((p, i) =>
+  `<div class="card"><div class="n">${String(i + 1).padStart(2, '0')}</div><h4>${p[0]}</h4><p>${p[1]}</p></div>`).join('');
+document.getElementById('components').innerHTML = COMPONENTS.map(c =>
+  `<div class="card"><h4>${c[0]}</h4><p>${c[1]}</p></div>`).join('');
+document.getElementById('roadmap').innerHTML = ROADMAP.map(r =>
+  `<div class="phase ${r[3] ? 'now' : ''}"><h4>${r[0]}${r[3] ? '<em>NOW</em>' : ''}</h4><p>${r[1]}</p><p class="exit">${r[2]}</p></div>`).join('');
+
+/* ================= scene ================= */
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.prepend(renderer.domElement);
+
+const labelRenderer = new CSS2DRenderer({ element: document.getElementById('labels') });
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05070d);
+scene.fog = new THREE.FogExp2(0x05070d, 0.022);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 300);
+camera.position.set(18, 15, 24);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(-1, 4.5, -1);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 10;
+controls.maxDistance = 60;
+controls.maxPolarAngle = Math.PI * 0.48;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.35;
+controls.enableZoom = true;
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.7, 0.45, 0.22);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+scene.add(new THREE.AmbientLight(0x6070a0, 0.6));
+const key = new THREE.DirectionalLight(0xbfd0ff, 1.4); key.position.set(10, 20, 10); scene.add(key);
+const rim = new THREE.PointLight(0x8b5cf6, 60, 40); rim.position.set(0, 12, 0); scene.add(rim);
+
+const COLORS = {
+  pending: new THREE.Color(0x3b4466), running: new THREE.Color(0xfbbf24), verifying: new THREE.Color(0x22d3ee),
+  reviewing: new THREE.Color(0xa78bfa), accepted: new THREE.Color(0x34d399), failed: new THREE.Color(0xf87171),
+};
+
+const clickables = [];
+function makeLabel(html, cls, infoKey) {
+  const el = document.createElement('div');
+  el.className = 'lbl ' + (cls || '');
+  el.innerHTML = html;
+  if (infoKey) el.addEventListener('click', e => { e.stopPropagation(); showInfo(infoKey); });
+  return new CSS2DObject(el);
+}
+function tagClick(obj, k) { obj.userData.info = k; clickables.push(obj); }
+
+/* ---- ground ---- */
+const grid = new THREE.GridHelper(120, 120, 0x1c2850, 0x0e1530);
+grid.material.transparent = true; grid.material.opacity = 0.55;
+scene.add(grid);
+const glowDisc = new THREE.Mesh(new THREE.CircleGeometry(16, 64),
+  new THREE.MeshBasicMaterial({ color: 0x1a2a6c, transparent: true, opacity: 0.18 }));
+glowDisc.rotation.x = -Math.PI / 2; glowDisc.position.y = 0.01; scene.add(glowDisc);
+
+/* ---- stars ---- */
+{
+  const g = new THREE.BufferGeometry(), n = 1400, p = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const r = 70 + Math.random() * 60, t = Math.random() * Math.PI * 2, ph = Math.random() * Math.PI * 0.5;
+    p.set([r * Math.cos(t) * Math.cos(ph), r * Math.sin(ph) + 5, r * Math.sin(t) * Math.cos(ph)], i * 3);
+  }
+  g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x8090c0, size: 0.25, transparent: true, opacity: 0.7 })));
+}
+
+const edgeMat = c => new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.9 });
+function slab(w, h, d, color, edge) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, metalness: 0.6, roughness: 0.35 }));
+  m.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat(edge)));
+  return m;
+}
+
+/* ---- control plane (Mac 1) ---- */
+const cp = new THREE.Group(); scene.add(cp);
+const base = slab(11, 0.6, 6.5, 0x0f1424, 0x3b82f6); base.position.y = 0.3; cp.add(base); tagClick(base, 'orchestrator');
+const baseLbl = makeLabel('MAC 1 · CONTROL PLANE<small>repo · worktrees · agents · tests · git</small>', '', 'orchestrator');
+baseLbl.position.set(0, -0.2, 3.9); cp.add(baseLbl);
+
+// orchestrator core
+const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.9, 0),
+  new THREE.MeshStandardMaterial({ color: 0x60a5fa, emissive: 0x1d4ed8, emissiveIntensity: 1.6, metalness: 0.3, roughness: 0.2, flatShading: true }));
+core.position.set(0, 2.1, 0); cp.add(core); tagClick(core, 'orchestrator');
+const coreLbl = makeLabel('orchestrator', '', 'orchestrator'); coreLbl.position.set(0, 3.3, 0); cp.add(coreLbl);
+
+// scheduler rings
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.85 });
+const ring1 = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.03, 8, 96), ringMat);
+const ring2 = new THREE.Mesh(new THREE.TorusGeometry(2.0, 0.02, 8, 96), ringMat.clone());
+ring2.material.opacity = 0.45;
+ring1.position.copy(core.position); ring2.position.copy(core.position);
+cp.add(ring1, ring2); tagClick(ring1, 'scheduler');
+const schLbl = makeLabel('scheduler', '', 'scheduler'); schLbl.position.set(2.4, 2.1, 0); cp.add(schLbl);
+
+// state store
+const store = new THREE.Group(); store.position.set(-4.2, 0.6, -1.6); cp.add(store);
+for (let i = 0; i < 4; i++) {
+  const c = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 0.32, 32),
+    new THREE.MeshStandardMaterial({ color: 0x172036, emissive: 0x7c3aed, emissiveIntensity: 0.25 + i * 0.08, metalness: 0.5, roughness: 0.3 }));
+  c.position.y = 0.25 + i * 0.4; store.add(c); tagClick(c, 'store');
+}
+const stLbl = makeLabel('event store<small>SQLite · append-only</small>', '', 'store'); stLbl.position.set(0, 2.2, 0); store.add(stLbl);
+
+// worktrees
+const WT_COUNT = 6, worktrees = [];
+for (let i = 0; i < WT_COUNT; i++) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.85, 0.85),
+    new THREE.MeshStandardMaterial({ color: 0x0d1220, emissive: 0x3b4466, emissiveIntensity: 0.6, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.92 }));
+  m.add(new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), edgeMat(0x6b7bb0)));
+  m.position.set(-3.2 + i * 1.28, 1.15, 2.1);
+  cp.add(m); tagClick(m, 'worktrees');
+  worktrees.push({ mesh: m, task: null });
+}
+const wtLbl = makeLabel('.worktrees/<small>one task · one branch · one agent</small>', '', 'worktrees');
+wtLbl.position.set(0, 2.15, 2.1); cp.add(wtLbl);
+
+/* ---- frontier planner ---- */
+const planner = new THREE.Group(); planner.position.set(0, 10.5, -1); scene.add(planner);
+const plannerCore = new THREE.Mesh(new THREE.IcosahedronGeometry(1.25, 1),
+  new THREE.MeshStandardMaterial({ color: 0xa78bfa, emissive: 0x7c3aed, emissiveIntensity: 0.9, flatShading: true, metalness: 0.2, roughness: 0.3 }));
+const plannerWire = new THREE.Mesh(new THREE.IcosahedronGeometry(2.1, 1),
+  new THREE.MeshBasicMaterial({ color: 0xc4b5fd, wireframe: true, transparent: true, opacity: 0.25 }));
+planner.add(plannerCore, plannerWire); tagClick(plannerCore, 'planner');
+const plLbl = makeLabel('FRONTIER PLANNER<small>clarify · decompose · final review</small>', '', 'planner');
+plLbl.position.set(0, 2.9, 0); planner.add(plLbl);
+// beam
+const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 7.2, 8),
+  new THREE.MeshBasicMaterial({ color: 0xa78bfa, transparent: true, opacity: 0.35 }));
+beam.position.set(0, 6.6, -0.5); scene.add(beam);
+
+/* ---- task DAG (invoice ingestion example) ---- */
+const TASKS = [
+  { id: 'extraction-contract', deps: [], col: 0, row: 0 },
+  { id: 'inbound-email', deps: ['extraction-contract'], col: 1, row: -1.5 },
+  { id: 'pdf-extraction', deps: ['extraction-contract'], col: 1, row: -0.5 },
+  { id: 'project-matching', deps: ['extraction-contract'], col: 1, row: 0.5 },
+  { id: 'material-matching', deps: ['extraction-contract'], col: 1, row: 1.5 },
+  { id: 'pending-review-ui', deps: ['project-matching', 'material-matching'], col: 2, row: 1 },
+  { id: 'integration-tests', deps: ['inbound-email', 'pdf-extraction', 'pending-review-ui'], col: 3, row: 0 },
+  { id: 'adversarial-review', deps: ['integration-tests'], col: 4, row: 0 },
+];
+const dag = new THREE.Group(); dag.position.set(-15, 5.5, -1); dag.rotation.y = 0.55; scene.add(dag);
+const byId = {};
+TASKS.forEach(t => {
+  const mat = new THREE.MeshStandardMaterial({ color: 0x1a2038, emissive: COLORS.pending.clone(), emissiveIntensity: 1.2, roughness: 0.3 });
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.42, 24, 16), mat);
+  m.position.set(t.col * 2.4, -t.row * 1.5, 0);
+  dag.add(m); tagClick(m, 'dag');
+  const l = makeLabel(t.id, 'task', 'dag'); l.position.set(0, 0.75, 0); m.add(l);
+  t.mesh = m; t.label = l; t.state = 'pending'; t.progress = 0; t.node = null; t.wt = null; byId[t.id] = t;
+});
+const dagEdges = [];
+TASKS.forEach(t => t.deps.forEach(d => {
+  const a = byId[d].mesh.position, b = t.mesh.position;
+  const curve = new THREE.CubicBezierCurve3(a, new THREE.Vector3((a.x + b.x) / 2, a.y, 0), new THREE.Vector3((a.x + b.x) / 2, b.y, 0), b);
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(24)),
+    new THREE.LineBasicMaterial({ color: 0x3b4a80, transparent: true, opacity: 0.7 }));
+  dag.add(line); dagEdges.push({ line, from: byId[d], to: t });
+}));
+const dagLbl = makeLabel('TASK DAG<small>invoice ingestion · 8 packets</small>', '', 'dag');
+dagLbl.position.set(4.8, 3.6, 0); dag.add(dagLbl);
+
+/* ---- inference nodes (Macs 2–4) ---- */
+const NODES = [
+  { id: 'mac-2', model: 'qwen-coder-32b', pos: new THREE.Vector3(-9, 0, -12) },
+  { id: 'mac-3', model: 'devstral-large', pos: new THREE.Vector3(0, 0, -15) },
+  { id: 'mac-4', model: 'qwen-coder + reviewer', pos: new THREE.Vector3(9, 0, -12) },
+];
+NODES.forEach((n, i) => {
+  const g = new THREE.Group(); g.position.copy(n.pos); scene.add(g);
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.6, 0.25, 48),
+    new THREE.MeshStandardMaterial({ color: 0x0c1120, emissive: 0x0e7490, emissiveIntensity: 0.4, metalness: 0.7, roughness: 0.3 }));
+  pad.position.y = 0.12; g.add(pad);
+  n.lights = [];
+  for (let k = 0; k < 4; k++) {
+    const s = slab(2.1, 0.55, 2.1, 0x111827, 0x22d3ee);
+    s.position.y = 0.6 + k * 0.72; g.add(s); tagClick(s, 'node');
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.06, 0.02),
+      new THREE.MeshBasicMaterial({ color: 0x22d3ee }));
+    strip.position.set(0, 0, 1.06); s.add(strip); n.lights.push(strip);
+  }
+  const halo = new THREE.Mesh(new THREE.TorusGeometry(1.9, 0.03, 8, 64), new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.6 }));
+  halo.rotation.x = Math.PI / 2; halo.position.y = 3.7; g.add(halo); n.halo = halo;
+  n.label = makeLabel(`${n.id.toUpperCase()} · MAGNITUDE<small>${n.model} · 0/1 sessions</small>`, '', 'node');
+  n.label.position.set(0, 4.6, 0); g.add(n.label);
+  n.group = g; n.status = 'idle'; n.active = 0; n.max = 1; n.port = new THREE.Vector3(n.pos.x, 3.2, n.pos.z);
+});
+
+/* ---- gates: verification → review → main ---- */
+function portal(color, pos, k, text) {
+  const g = new THREE.Group(); g.position.copy(pos); scene.add(g);
+  const t = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.09, 12, 64),
+    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.6 }));
+  t.rotation.y = Math.PI / 2; g.add(t); tagClick(t, k);
+  const inner = new THREE.Mesh(new THREE.CircleGeometry(1.15, 48), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.08, side: THREE.DoubleSide }));
+  inner.rotation.y = Math.PI / 2; g.add(inner);
+  const l = makeLabel(text, '', k); l.position.set(0, 1.9, 0); g.add(l);
+  return g;
+}
+const gVerify = portal(0x22d3ee, new THREE.Vector3(9.5, 2.2, 2), 'verify', 'verification<small>declared checks · evidence</small>');
+const gReview = portal(0xa78bfa, new THREE.Vector3(13.5, 2.2, 0), 'review', 'review<small>accept · repair · escalate</small>');
+// main branch
+const mainPts = [new THREE.Vector3(16, 0.6, -2), new THREE.Vector3(16, 0.6, 10)];
+const mainLine = new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(...mainPts), 1, 0.08, 8),
+  new THREE.MeshBasicMaterial({ color: 0x34d399 }));
+scene.add(mainLine); tagClick(mainLine, 'main');
+const commits = [];
+for (let i = 0; i < 9; i++) {
+  const c = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), new THREE.MeshBasicMaterial({ color: 0x1f3a2e }));
+  c.position.set(16, 0.6, 9 - i * 1.25); scene.add(c); commits.push(c);
+}
+const mainLbl = makeLabel('main<small>human-approved merge</small>', '', 'main'); mainLbl.position.set(16, 1.6, 10.5); scene.add(mainLbl);
+
+/* ---- static conduits (control plane ↔ nodes) ---- */
+function conduit(a, b, lift, color, op) {
+  const mid = a.clone().lerp(b, 0.5); mid.y += lift;
+  const curve = new THREE.QuadraticBezierCurve3(a, mid, b);
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(48)),
+    new THREE.LineDashedMaterial({ color, dashSize: 0.3, gapSize: 0.25, transparent: true, opacity: op }));
+  line.computeLineDistances(); scene.add(line);
+  return { curve, line };
+}
+const coreWorld = new THREE.Vector3(0, 2.1, 0);
+NODES.forEach(n => { n.conduit = conduit(coreWorld, n.port, 3, 0x22d3ee, 0.35); });
+
+/* ================= particles ================= */
+const particles = [];
+const pGeo = new THREE.SphereGeometry(0.11, 10, 8);
+function emit(curve, color, speed = 0.6, size = 1) {
+  const m = new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({ color }));
+  m.scale.setScalar(size); scene.add(m);
+  particles.push({ m, curve, t: 0, speed });
+}
+function arc(a, b, lift) { const mid = a.clone().lerp(b, 0.5); mid.y += lift; return new THREE.QuadraticBezierCurve3(a.clone(), mid, b.clone()); }
+function worldOf(obj) { return obj.getWorldPosition(new THREE.Vector3()); }
+
+/* ================= simulation ================= */
+const evBox = document.getElementById('events');
+let simTime = 0;
+function log(html, color = '#8b95b8') {
+  const d = document.createElement('div'); d.className = 'ev';
+  d.innerHTML = `<span style="color:#4b5578">${simTime.toFixed(1).padStart(5, ' ')}</span> <span style="color:${color}">${html}</span>`;
+  evBox.prepend(d);
+  while (evBox.children.length > 9) evBox.lastChild.remove();
+}
+
+function setState(t, s) {
+  t.state = s;
+  t.mesh.material.emissive.copy(COLORS[s]);
+  t.mesh.material.emissiveIntensity = s === 'pending' ? 0.8 : 2.0;
+  if (t.wt) t.wt.mesh.material.emissive.copy(COLORS[s]);
+}
+
+function nodeLabel(n) {
+  n.label.element.innerHTML = `${n.id.toUpperCase()} · MAGNITUDE<small>${n.status === 'offline' ? 'OFFLINE · circuit open' : `${n.model} · ${n.active}/${n.max} sessions`}</small>`;
+  n.label.element.classList.toggle('offline', n.status === 'offline');
+}
+
+function pickNode() {
+  const eligible = NODES.filter(n => n.status !== 'offline' && n.active < n.max);
+  if (!eligible.length) return null;
+  eligible.sort((a, b) => a.active - b.active || NODES.indexOf(a) - NODES.indexOf(b));
+  return eligible[0];
+}
+
+let running = false, planning = 0;
+function resetRun() {
+  TASKS.forEach(t => { if (t.wt) t.wt.task = null; t.wt = null; t.node = null; t.progress = 0; t.attempt = 0; setState(t, 'pending'); });
+  worktrees.forEach(w => w.mesh.material.emissive.copy(COLORS.pending));
+  NODES.forEach(n => { n.active = 0; nodeLabel(n); });
+  commits.forEach(c => c.material.color.set(0x1f3a2e));
+  evBox.innerHTML = ''; simTime = 0;
+  planning = 2.6; running = true;
+  log('<b>run.started</b> goal: invoice PDF ingestion', '#e6ebff');
+  log('frontier planner inspecting repository…', '#a78bfa');
+  for (let i = 0; i < 6; i++) setTimeout(() => emit(arc(worldOf(plannerCore), worldOf(dag), 2), 0xc4b5fd, 0.7), i * 220);
+}
+
+function tick(dt) {
+  if (!running) return;
+  simTime += dt;
+  if (planning > 0) {
+    planning -= dt;
+    if (planning <= 0) log('<b>dag.validated</b> 8 packets · acyclic · checks declared', '#a78bfa');
+    return;
+  }
+  for (const t of TASKS) {
+    if (t.state === 'pending' && t.deps.every(d => byId[d].state === 'accepted')) {
+      const node = pickNode(); const wt = worktrees.find(w => !w.task);
+      if (!node || !wt) continue;
+      t.node = node; t.wt = wt; wt.task = t; node.active++; nodeLabel(node);
+      t.attempt = (t.attempt || 0) + 1; t.progress = 0;
+      setState(t, 'running');
+      log(`<b>attempt.started</b> ${t.id} → ${node.id}`, '#fbbf24');
+      emit(arc(worldOf(t.mesh), worldOf(core), 3), 0xfbbf24, 0.9);
+    } else if (t.state === 'running') {
+      t.progress += dt * (0.16 + Math.random() * 0.05);
+      if (Math.random() < dt * 2.4) {
+        const a = worldOf(t.wt.mesh), b = t.node.port;
+        if (Math.random() < 0.5) emit(arc(a, b, 4), 0xfbbf24, 0.75, 0.9); else emit(arc(b, a, 4), 0x22d3ee, 0.75, 0.9);
+      }
+      if (t.progress >= 1) {
+        t.node.active--; nodeLabel(t.node); t.node = null;
+        setState(t, 'verifying'); t.progress = 0;
+        log(`<b>verify</b> ${t.id} running declared checks`, '#22d3ee');
+        emit(arc(worldOf(t.wt.mesh), worldOf(gVerify), 2), 0x22d3ee, 0.9);
+      }
+    } else if (t.state === 'verifying') {
+      t.progress += dt * 0.7;
+      if (t.progress >= 1) {
+        setState(t, 'reviewing'); t.progress = 0;
+        log(`<b>review.requested</b> ${t.id}`, '#a78bfa');
+        emit(arc(worldOf(gVerify), worldOf(gReview), 1.5), 0xa78bfa, 0.9);
+      }
+    } else if (t.state === 'reviewing') {
+      t.progress += dt * 0.8;
+      if (t.progress >= 1) {
+        if (!t.repaired && Math.random() < 0.18) {
+          t.repaired = true; t.state = 'pending'; t.wt.task = null; t.wt.mesh.material.emissive.copy(COLORS.pending); t.wt = null;
+          setState(t, 'pending');
+          log(`<b>repair-required</b> ${t.id} → narrow repair packet`, '#f87171');
+          continue;
+        }
+        setState(t, 'accepted');
+        const wt = t.wt; wt.task = null; t.wt = null; wt.mesh.material.emissive.copy(COLORS.accepted);
+        setTimeout(() => { if (!wt.task) wt.mesh.material.emissive.copy(COLORS.pending); }, 900);
+        const idx = TASKS.filter(x => x.state === 'accepted').length - 1;
+        emit(arc(worldOf(gReview), commits[idx].position, 2), 0x34d399, 0.9);
+        setTimeout(() => commits[idx].material.color.set(0x34d399), 1000);
+        log(`<b>accepted</b> ${t.id}`, '#34d399');
+      }
+    }
+  }
+  if (TASKS.every(t => t.state === 'accepted')) {
+    running = false;
+    log('<b>integration.ready</b> awaiting human merge approval', '#34d399');
+    commits[8].material.color.set(0x6ee7b7);
+    emit(arc(worldOf(gReview), worldOf(plannerCore), 4), 0xc4b5fd, 0.5, 1.4);
+    setTimeout(resetRun, 7000);
+  }
+}
+
+function killNode() {
+  const target = NODES.find(n => n.status !== 'offline' && n.active > 0) || NODES.find(n => n.status !== 'offline');
+  if (!target) return;
+  target.status = 'offline'; target.active = 0; nodeLabel(target);
+  target.lights.forEach(l => l.material.color.set(0xf87171));
+  target.halo.material.color.set(0xf87171);
+  target.conduit.line.material.color.set(0xf87171);
+  log(`<b>node.offline</b> ${target.id} · probe failed, circuit open`, '#f87171');
+  TASKS.filter(t => t.node === target).forEach(t => {
+    t.node = null; t.state = 'pending'; if (t.wt) { t.wt.task = null; t.wt.mesh.material.emissive.copy(COLORS.pending); t.wt = null; }
+    setState(t, 'pending');
+    log(`<b>attempt.failed</b> ${t.id} · lease expired → reassign`, '#fbbf24');
+  });
+  setTimeout(() => {
+    target.status = 'idle'; nodeLabel(target);
+    target.lights.forEach(l => l.material.color.set(0x22d3ee));
+    target.halo.material.color.set(0x22d3ee);
+    target.conduit.line.material.color.set(0x22d3ee);
+    log(`<b>node.recovered</b> ${target.id} · cooldown elapsed`, '#22d3ee');
+  }, 9000);
+}
+
+/* ================= interaction ================= */
+const info = document.getElementById('info');
+function showInfo(k) {
+  const [kk, h, p] = INFO[k];
+  document.getElementById('info-k').textContent = kk;
+  document.getElementById('info-h').textContent = h;
+  document.getElementById('info-p').textContent = p;
+  info.classList.add('show');
+}
+info.querySelector('.close').onclick = () => info.classList.remove('show');
+
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', e => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const hit = ray.intersectObjects(clickables, false)[0];
+  if (hit) showInfo(hit.object.userData.info); else info.classList.remove('show');
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  renderer.domElement.style.cursor = ray.intersectObjects(clickables, false).length ? 'pointer' : 'grab';
+});
+
+document.getElementById('btn-run').onclick = resetRun;
+document.getElementById('btn-kill').onclick = killNode;
+const orbitBtn = document.getElementById('btn-orbit');
+orbitBtn.onclick = () => { controls.autoRotate = !controls.autoRotate; orbitBtn.style.color = controls.autoRotate ? 'var(--cyan)' : ''; };
+orbitBtn.style.color = 'var(--cyan)';
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h); labelRenderer.setSize(w, h); composer.setSize(w, h);
+  bloom.resolution.set(w, h);
+  camera.aspect = w / h;
+  camera.position.setLength(w < 820 ? 44 : 34);
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+// pause rendering when hero is off-screen
+let visible = true;
+new IntersectionObserver(([e]) => { visible = e.isIntersecting; }).observe(stage);
+
+/* ================= loop ================= */
+const clock = new THREE.Clock(), clockEl = document.getElementById('clock');
+function frame() {
+  requestAnimationFrame(frame);
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  tick(dt);
+  clockEl.textContent = `t+${simTime.toFixed(0)}s`;
+  if (!visible) return;
+
+  core.rotation.y += dt * 0.8; core.rotation.x = Math.sin(t * 0.7) * 0.3;
+  ring1.rotation.x = t * 0.6; ring1.rotation.y = t * 0.4;
+  ring2.rotation.x = -t * 0.35; ring2.rotation.z = t * 0.5;
+  plannerCore.rotation.y += dt * 0.4; plannerCore.rotation.x += dt * 0.15;
+  plannerWire.rotation.y -= dt * 0.15;
+  planner.position.y = 10.5 + Math.sin(t * 0.8) * 0.25;
+  beam.material.opacity = 0.2 + (planning > 0 ? 0.5 : 0.1) * (0.5 + 0.5 * Math.sin(t * 6));
+  dag.position.y = 5.5 + Math.sin(t * 0.6 + 1) * 0.15;
+
+  NODES.forEach((n, i) => {
+    const busy = n.active > 0;
+    n.lights.forEach((l, k) => { l.scale.x = n.status === 'offline' ? 1 : busy ? 0.4 + 0.6 * Math.abs(Math.sin(t * 7 + k * 1.3 + i)) : 0.35; });
+    n.halo.rotation.z += dt * (busy ? 1.5 : 0.3);
+    n.halo.position.y = 3.7 + Math.sin(t * 2 + i) * 0.12;
+    n.conduit.line.material.dashOffset -= dt * (busy ? 1.2 : 0.2);
+  });
+  TASKS.forEach(tk => {
+    const s = tk.state === 'running' ? 1 + 0.12 * Math.sin(t * 8) : 1;
+    tk.mesh.scale.setScalar(s);
+  });
+  dagEdges.forEach(e => {
+    const lit = e.from.state === 'accepted';
+    e.line.material.color.set(lit ? (e.to.state === 'accepted' ? 0x34d399 : 0x5b6fb8) : 0x2a3460);
+  });
+  worktrees.forEach((w, i) => { w.mesh.rotation.y = w.task ? t * 1.2 + i : w.mesh.rotation.y * 0.95; });
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.t += dt * p.speed;
+    if (p.t >= 1) { scene.remove(p.m); p.m.material.dispose(); particles.splice(i, 1); continue; }
+    p.curve.getPoint(p.t, p.m.position);
+  }
+
+  controls.update();
+  composer.render();
+  labelRenderer.render(scene, camera);
+}
+frame();
+setTimeout(resetRun, 600);
+</script>
+</body>
+</html>
